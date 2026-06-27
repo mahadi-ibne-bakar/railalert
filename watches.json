@@ -1,0 +1,10 @@
+[
+  {
+    "label": "Mohanagar Express 721, Chattogram-Dhaka, 10-Jul-2026",
+    "from_city": "Chattogram",
+    "to_city": "Dhaka",
+    "date_of_journey": "10-Jul-2026",
+    "train_model": "721",
+    "seat_class_param": "S_CHAIR"
+  }
+]
