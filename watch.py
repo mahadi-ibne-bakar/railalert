@@ -141,12 +141,18 @@ def check_one_watch(watch, state):
     train = find_train(trains, watch["train_model"])
     if train is None:
         # Train not present in this result set this round (could be a route/date
-        # mismatch, a seat_class quirk, or it's just not running). Don't treat
-        # this as "everything sold out" -- leave prior counts untouched so a
-        # transient miss doesn't get reported as a drop to zero.
-        print(f"[{key}] train_model {watch['train_model']} not found in response")
+        # mismatch, a seat_class quirk, the booking window not open yet, or it's
+        # just not running). Don't treat this as "everything sold out" -- leave
+        # prior counts untouched so a transient miss doesn't get reported as a
+        # drop to zero.
+        seen = [t.get("train_model") for t in trains]
+        print(
+            f"[{key}] train_model {watch['train_model']} not found. "
+            f"{len(trains)} train(s) returned, models seen: {seen}"
+        )
         return [], None, False
 
+    is_first_observation = key not in state
     prev_counts = state.get(key, {})
     new_counts = {}
     alerts = []
@@ -156,9 +162,14 @@ def check_one_watch(watch, state):
         online = seat_type["seat_counts"]["online"]
         fare = seat_type.get("fare")
         new_counts[cls] = online
+        if is_first_observation:
+            continue  # nothing to compare against yet -- just record the baseline
         prev = prev_counts.get(cls, 0)
         if prev == 0 and online > 0:
             alerts.append(f"{key}\n  {cls}: {online} seat(s) now online (fare {fare})")
+
+    if is_first_observation:
+        print(f"[{key}] first observation, recording baseline: {new_counts}")
 
     return alerts, new_counts, False
 
