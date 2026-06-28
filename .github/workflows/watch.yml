@@ -4,13 +4,8 @@ on:
   schedule:
     # Every 5 minutes. GitHub won't honor anything tighter than this, and
     # during busy periods runs can be delayed a few minutes regardless.
-    # Change to "*/10 * * * *" if you want to stay further under the
-    # Actions minutes quota on a private repo.
     - cron: "*/5 * * * *"
   workflow_dispatch: {}   # lets you trigger a manual test run from the Actions tab
-
-permissions:
-  contents: write   # needed so the workflow can commit the updated state file
 
 jobs:
   watch:
@@ -25,20 +20,14 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run watcher
+      - name: Run worker
         env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           RAIL_TOKEN: ${{ secrets.RAIL_TOKEN }}
           RAIL_DEVICE_ID: ${{ secrets.RAIL_DEVICE_ID }}
           RAIL_DEVICE_KEY: ${{ secrets.RAIL_DEVICE_KEY }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
-          EMAIL_TO: ${{ secrets.EMAIL_TO }}
-        run: python watch.py
-
-      - name: Commit updated state
-        run: |
-          git config user.name "railalert-bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add state.json
-          git diff --quiet --cached || git commit -m "update seat state [skip ci]"
-          git push
+          OPERATOR_EMAIL: ${{ secrets.OPERATOR_EMAIL }}
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+        run: python worker.py

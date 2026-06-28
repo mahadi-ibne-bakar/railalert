@@ -1,102 +1,85 @@
 # railalert
 
-Watches a specific train/route/date on Bangladesh Railway's e-ticketing
-backend and emails you the moment a seat opens up (refund released, or a
-newly added compartment). Runs on a free GitHub Actions schedule.
+Multi-tenant version: customers will eventually sign up through a web app
+(not built yet), pick trains to watch, and pay a flat fee per watch. This
+step replaces the single JSON-file state from the personal-use version with
+a shared Postgres database, so the worker can serve many customers at once
+and many customers watching the same train only cost one API call.
 
-## How it works
+`watch.py`, `watches.json`, and `state.json` are retired -- delete them from
+your repo (`git rm watch.py watches.json state.json`). `worker.py` replaces
+all three.
 
-Every 5 minutes, GitHub Actions runs `watch.py`, which calls the same
-backend API the official site/app uses, compares the result to the last
-run (saved in `state.json`, committed back to the repo each time), and
-emails you if any seat type goes from 0 online seats to more than 0.
+## What changed from the personal-use version
 
-The API requires a personal access token tied to your account, and that
-token expires roughly every 12 hours. Getting a fresh one means logging in
-through a real browser (the login endpoint has a bot-check that this
-project intentionally does not try to get around) and copying it out
-manually. That's the one recurring manual step here.
+- State lives in Postgres now, not in a file committed back to git. The
+  workflow no longer needs a "commit updated state" step or write access to
+  the repo.
+- The worker can serve many customers' watches in one run. Identical
+  (route, date, class) lookups across customers are deduped into a single
+  API call.
+- Two alerting modes per watch: `active` (only pings on a genuine 0 -> >0
+  transition, same as before) and `reminder` (pings every ~30 minutes while
+  seats remain available -- entered when a customer says "couldn't buy").
+- No web app yet. For now, watches are created and managed by hand directly
+  in Supabase's table editor. That's enough to prove the worker works
+  end-to-end against the new database before building the actual signup
+  flow on top of it.
 
 ## One-time setup
 
-1. **Put this code in its own GitHub repo.**
-   If you already have a local folder for this (e.g. the one you were
-   testing in), copy these files into it, then:
+1. **Create a free Supabase project** at supabase.com. Free projects pause
+   after 7 days of *inactivity* -- since our own worker queries the database
+   every 5 minutes, that pause should never actually trigger in practice.
+
+2. **Run the schema.** In the Supabase dashboard: SQL Editor -> paste the
+   contents of `schema.sql` -> Run.
+
+3. **Get your connection string.** Project Settings -> Database -> Connection
+   string (URI format). This is your `DATABASE_URL`.
+
+4. **Insert one test user and one test watch by hand**, reusing the exact
+   train we already confirmed works, so this run validates the new
+   Postgres-backed worker against data we already trust:
+   ```sql
+   INSERT INTO users (email, password_hash)
+   VALUES ('you@example.com', 'placeholder')
+   RETURNING id;
+   -- note the id this returns, then:
+
+   INSERT INTO watches (
+     user_id, from_city, to_city, date_of_journey, train_model,
+     train_label, seat_class_param, is_paid, status, action_token
+   ) VALUES (
+     1,                          -- the id from above
+     'Chattogram', 'Dhaka',
+     '2026-07-03',               -- pick a date still inside the ~10-day booking window
+     '721', 'Mohanagar Express (721)',
+     'S_CHAIR', true, 'active', 'test-token-123'
+   );
    ```
-   git init
-   git add .
-   git commit -m "initial commit"
-   git branch -M main
-   git remote add origin https://github.com/<you>/railalert.git
-   git push -u origin main
-   ```
-   A **public** repo gets unlimited free Actions minutes; a **private** one
-   gets ~2000 min/month free, which a 5-minute schedule can get close to
-   over a full month. Nothing committed here is sensitive (your credentials
-   never go into any file, only into GitHub Secrets below) — the only thing
-   a public repo reveals is which route/date you're watching, in
-   `watches.json`. Pick whichever trade-off you're comfortable with; switch
-   to `*/10 * * * *` in the workflow file if you go private and want more
-   headroom.
 
-2. **Get a Gmail App Password** (or use any other SMTP provider):
-   - Turn on 2-Step Verification on the Google account you want to send from.
-   - Go to https://myaccount.google.com/apppasswords, create one for "Mail".
-   - Copy the 16-character password it gives you.
+5. **Update GitHub Secrets.** Add `DATABASE_URL` (from step 3). Your
+   `RAIL_TOKEN` / `RAIL_DEVICE_ID` / `RAIL_DEVICE_KEY` / `SMTP_USER` /
+   `SMTP_PASS` secrets stay the same as before. Add `OPERATOR_EMAIL` (where
+   "token expired" alerts go -- can be the same as `SMTP_USER`). You can
+   skip `APP_BASE_URL` for now; it only matters once the web app exists and
+   the email action links need somewhere real to point.
 
-3. **Add repository secrets.**
-   In your repo: Settings → Secrets and variables → Actions → New repository secret.
-   Add these:
-   - `RAIL_TOKEN` — see step 4
-   - `RAIL_DEVICE_ID` — see step 4
-   - `RAIL_DEVICE_KEY` — see step 4
-   - `SMTP_USER` — the Gmail address you created the app password for
-   - `SMTP_PASS` — the 16-character app password from step 2
-   - `EMAIL_TO` — where you want the alerts sent (can be the same as `SMTP_USER`)
+6. **Test manually.** Actions tab -> "Rail Seat Watcher" -> "Run workflow".
+   Then check, in Supabase's table editor:
+   - `watches.last_counts` on your test row -- should now show real seat
+     counts for train 721, same shape as what we saw from the live API
+     earlier.
+   - `ping_log` -- should be empty on this first run (cold-start baseline,
+     same fix as before -- no alert on a watch's very first observation).
 
-4. **Get your token and device headers.**
-   - Log into `eticket.railway.gov.bd` in a normal browser.
-     (Since the token already shared in our earlier chat session is exposed,
-     get a completely fresh one now — ideally after changing your password.)
-   - Do any train search on the site so a request fires.
-   - Open dev tools → Network tab → click the `search-trips-v2` request.
-   - In its Request Headers, copy the values of `authorization` (just the
-     part after `Bearer `), `x-device-id`, and `x-device-key`.
-   - Paste each into the matching secret from step 3.
+   To actually see an alert fire, edit `last_counts` in the table editor to
+   set one class to `0`, then run the workflow again manually.
 
-5. **Edit `watches.json`** with the train(s) you actually want to watch.
-   - `from_city` / `to_city`: as used on the site (e.g. `"Dhaka"`, `"Chattogram"`)
-   - `date_of_journey`: format is `DD-MMM-YYYY`, e.g. `"10-Jul-2026"`
-   - `train_model`: the number in parentheses after the train's name on the
-     site/app, e.g. for "MOHANAGAR EXPRESS (721)" this is `"721"`
-   - `seat_class_param`: any class that train actually offers (this is a
-     required search parameter, not a filter — the response still includes
-     every class the train has). `S_CHAIR` is a safe default for most
-     intercity trains.
-   - `label`: anything readable — it's just used to identify this watch in
-     emails and in `state.json`.
+## What's next
 
-   You can list more than one watch in the array if you want to track
-   several trains/dates at once.
-
-6. **Test it manually before trusting the schedule.**
-   Repo → Actions tab → "Rail Seat Watcher" → "Run workflow". Check the run
-   log for errors, and check that `state.json` got updated with real seat
-   counts afterward.
-
-Once that run succeeds, the schedule takes over and you don't need to do
-anything else until the token expires again in ~12 hours, at which point
-you'll get an email telling you so.
-
-## Known limitations
-
-- **GitHub's cron isn't exact.** Scheduled runs can lag by a few minutes
-  during platform load. This isn't a guarantee of a check every 300 seconds
-  on the dot.
-- **No fully automatic re-login.** That's by design — automating past the
-  login bot-check isn't something this project does.
-- **Single quota tracked.** This watches the *online* booking quota (what
-  you can actually buy through the site/app), not the separate counter
-  quota.
-- If you change your account password, your current token will likely stop
-  working immediately — refresh the secrets right after, not before.
+The web app: signup/login, a form to create a watch, a dashboard showing
+ping history, the bKash payment confirmation step, and the actual pages the
+email action links point to. None of that exists yet -- this step only
+proves the worker + database side works.
