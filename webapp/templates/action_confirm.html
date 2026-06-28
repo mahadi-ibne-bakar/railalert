@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Updated - railalert{% endblock %}
+{% block content %}
+<h1>Got it</h1>
+{% if action == 'done' %}
+  <p>Marked as done. We've stopped watching this train. Good luck with your trip!</p>
+{% elif action == 'remind' %}
+  <p>We'll keep reminding you every ~30 minutes while seats are available.</p>
+{% elif action == 'stop' %}
+  <p>Stopped watching this train.</p>
+{% elif action == 'bought_some' %}
+  <p>Updated. We'll keep watching for the rest.</p>
+{% endif %}
+<p><a href="{{ url_for('login') }}">Log in</a> to see your dashboard.</p>
+{% endblock %}

@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Payment - railalert{% endblock %}
+{% block content %}
+<h1>One more step</h1>
+<p>You're tracking <strong>{{ watch.train_label }}</strong>, {{ watch.from_city }} to {{ watch.to_city }} on {{ watch.date_of_journey }}.</p>
+<p>Send <strong>{{ fee }} BDT</strong> via bKash "Send Money" to <strong>{{ bkash_number }}</strong>, using reference <strong>watch-{{ watch.id }}</strong>.</p>
+<p>We'll activate this watch once we've confirmed the payment — usually within a few hours.</p>
+<a href="{{ url_for('dashboard') }}">Back to dashboard</a>
+{% endblock %}

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Track a new train - railalert{% endblock %}
+{% block content %}
+<h1>Track a new train</h1>
+<form method="post">
+  <label>From city <input type="text" name="from_city" required placeholder="e.g. Chattogram"></label>
+  <label>To city <input type="text" name="to_city" required placeholder="e.g. Dhaka"></label>
+  <label>Date of journey <input type="date" name="date_of_journey" min="{{ today }}" required></label>
+  <label>Train number <input type="text" name="train_model" required placeholder="e.g. 721"></label>
+  <label>Train name <input type="text" name="train_label" required placeholder="e.g. Mohanagar Express (721)"></label>
+
+  <fieldset>
+    <legend>Which seat types do you care about?</legend>
+    <p class="hint">Leave all unchecked to be notified about any seat type.</p>
+    {% for c in seat_classes %}
+      <label class="checkbox"><input type="checkbox" name="class_{{ c }}"> {{ c }}</label>
+    {% endfor %}
+  </fieldset>
+
+  <label>How many tickets do you need? <input type="number" name="tickets_needed" value="1" min="1" required></label>
+
+  <button type="submit">Continue to payment</button>
+</form>
+{% endblock %}

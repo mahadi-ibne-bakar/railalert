@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}How many did you get? - railalert{% endblock %}
+{% block content %}
+<h1>{{ watch.train_label }}</h1>
+<p>How many tickets did you manage to buy?</p>
+<form method="post">
+  <input type="number" name="qty" min="1" value="1" required>
+  <button type="submit">Update</button>
+</form>
+{% endblock %}

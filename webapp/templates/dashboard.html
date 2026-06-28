@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - railalert{% endblock %}
+{% block content %}
+<h1>Your watches</h1>
+<a class="button" href="{{ url_for('new_watch') }}">Track a new train</a>
+
+{% if not watches %}
+  <p class="empty">No watches yet. Track a train above to get started.</p>
+{% endif %}
+
+<ul class="watch-list">
+  {% for w in watches %}
+  <li>
+    <a href="{{ url_for('watch_detail', watch_id=w.id) }}">
+      <span><strong>{{ w.train_label }}</strong> — {{ w.from_city }} to {{ w.to_city }}, {{ w.date_of_journey }}</span>
+      <span class="status status-{{ w.status }}">{{ w.status.replace('_', ' ') }}</span>
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+{% endblock %}

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ watch.train_label }} - railalert{% endblock %}
+{% block content %}
+<h1>{{ watch.train_label }}</h1>
+<p>{{ watch.from_city }} to {{ watch.to_city }}, {{ watch.date_of_journey }}</p>
+<p>Status: <span class="status status-{{ watch.status }}">{{ watch.status.replace('_', ' ') }}</span></p>
+<p>Tickets: {{ watch.tickets_acquired }} of {{ watch.tickets_needed }} acquired</p>
+
+{% if watch.status == 'pending_payment' %}
+  <p>Waiting on payment confirmation.
+     <a href="{{ url_for('payment_instructions', watch_id=watch.id) }}">See payment details again</a>.</p>
+{% elif watch.status in ['active', 'reminder'] %}
+  <form method="post" action="{{ url_for('watch_act', watch_id=watch.id) }}" class="inline">
+    <input type="hidden" name="action" value="done">
+    <button type="submit">Bought everything I needed</button>
+  </form>
+  <form method="post" action="{{ url_for('watch_act', watch_id=watch.id) }}" class="inline">
+    <input type="hidden" name="action" value="bought_some">
+    <input type="number" name="qty" min="1" value="1" style="width:4em">
+    <button type="submit">Bought some, still need more</button>
+  </form>
+  <form method="post" action="{{ url_for('watch_act', watch_id=watch.id) }}" class="inline">
+    <input type="hidden" name="action" value="remind">
+    <button type="submit">Couldn't buy, keep reminding me</button>
+  </form>
+  <form method="post" action="{{ url_for('watch_act', watch_id=watch.id) }}" class="inline">
+    <input type="hidden" name="action" value="stop">
+    <button type="submit" class="danger">Stop watching</button>
+  </form>
+{% else %}
+  <p class="empty">This watch has ended.</p>
+{% endif %}
+
+<h2>Notification history</h2>
+{% if not pings %}
+  <p class="empty">No notifications yet.</p>
+{% else %}
+<table>
+  <thead><tr><th>When</th><th>Seat type</th><th>Seats online</th><th>Fare</th></tr></thead>
+  <tbody>
+  {% for p in pings %}
+    <tr><td>{{ p.created_at }}</td><td>{{ p.seat_class }}</td><td>{{ p.seats_online }}</td><td>{{ p.fare }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}
