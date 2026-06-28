@@ -149,6 +149,11 @@ def main():
         key = (w["from_city"], w["to_city"], w["date_of_journey"], w["seat_class_param"])
         groups[key].append(w)
 
+    # Guarantee this row exists rather than assuming schema.sql's seed insert
+    # landed -- if it's ever missing (or gets deleted later), this heals it
+    # instead of crashing every single run.
+    cur.execute("INSERT INTO worker_state (id) VALUES (1) ON CONFLICT (id) DO NOTHING")
+
     cur.execute("SELECT token_expired_notified FROM worker_state WHERE id = 1")
     already_notified_expired = cur.fetchone()["token_expired_notified"]
     any_success = False
