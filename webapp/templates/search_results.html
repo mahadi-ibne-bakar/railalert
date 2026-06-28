@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Choose a train - railalert{% endblock %}
+{% block content %}
+<h1>{{ from_city }} &rarr; {{ to_city }}</h1>
+<p class="hint">{{ display_date }}</p>
+
+{% if not trains %}
+  <p class="empty">No trains found for this route and date. Double-check the
+     station names (try the suggestions as you type) and that the date is
+     within the booking window.</p>
+{% endif %}
+
+{% for train in trains %}
+<div class="train-card">
+  <h2>{{ train.trip_number }}</h2>
+  <p class="hint">{{ train.departure_date_time }} &rarr; {{ train.arrival_date_time }} ({{ train.travel_time }})</p>
+
+  <form method="post" action="{{ url_for('create_watch') }}">
+    <input type="hidden" name="from_city" value="{{ from_city }}">
+    <input type="hidden" name="to_city" value="{{ to_city }}">
+    <input type="hidden" name="date_of_journey" value="{{ date_of_journey }}">
+    <input type="hidden" name="train_model" value="{{ train.train_model }}">
+    <input type="hidden" name="train_label" value="{{ train.trip_number }}">
+    <input type="hidden" name="available_classes" value="{{ train.seat_types | map(attribute='type') | join(',') }}">
+
+    <fieldset>
+      <legend>Seat types</legend>
+      <p class="hint">Leave all unchecked to be notified about any seat type on this train.</p>
+      {% for st in train.seat_types %}
+        <label class="checkbox">
+          <input type="checkbox" name="class_{{ st.type }}">
+          {{ st.type }} -- {{ st.seat_counts.online }} online now, fare {{ st.fare }}
+        </label>
+      {% endfor %}
+    </fieldset>
+
+    <label>How many tickets do you need?
+      <input type="number" name="tickets_needed" value="1" min="1" required>
+    </label>
+
+    <button type="submit">Track this train</button>
+  </form>
+</div>
+{% endfor %}
+
+<a href="{{ url_for('new_watch') }}">Search a different route</a>
+{% endblock %}

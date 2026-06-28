@@ -117,3 +117,14 @@ th, td { text-align: left; padding: 0.5rem 0.4rem; border-bottom: 1px solid var(
 
 .flash { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1.5rem; }
 .empty { color: var(--muted); font-style: italic; }
+
+.train-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  padding: 1.2rem;
+  margin-bottom: 1rem;
+}
+.train-card h2 { margin: 0 0 0.2rem; font-size: 1.05rem; font-family: var(--font-mono); }
+.train-card form { margin: 0.8rem 0 0; }
+

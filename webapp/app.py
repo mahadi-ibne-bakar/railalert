@@ -1,11 +1,13 @@
+import json
 import os
 import secrets
-from datetime import date
+from datetime import date, datetime, timedelta
 from functools import wraps
 
 from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
+import railway_api
 from db import get_conn, get_cursor
 
 app = Flask(__name__)
@@ -14,9 +16,12 @@ app.config["SECRET_KEY"] = os.environ["SECRET_KEY"]
 BKASH_NUMBER = os.environ.get("BKASH_NUMBER", "01XXXXXXXXX")
 WATCH_FEE_BDT = os.environ.get("WATCH_FEE_BDT", "100")
 
-# Shown as checkboxes on the "new watch" form. Leaving all unchecked means
-# "any class" (stored as an empty array).
-SEAT_CLASSES = ["S_CHAIR", "SNIGDHA", "AC_S", "AC_B", "F_SEAT", "F_BERTH", "SHULOV"]
+# Same booking window the railway site itself enforces -- search dates
+# further out than this won't return anything useful.
+BOOKING_WINDOW_DAYS = 10
+
+with open(os.path.join(os.path.dirname(__file__), "stations.json")) as f:
+    STATIONS = json.load(f)
 
 
 @app.before_request
@@ -168,41 +173,77 @@ def dashboard():
 @app.route("/watches/new", methods=["GET", "POST"])
 @login_required
 def new_watch():
+    today = date.today()
+    max_date = today + timedelta(days=BOOKING_WINDOW_DAYS)
+
     if request.method == "POST":
-        user = current_user()
-        seat_classes = [c for c in SEAT_CLASSES if request.form.get(f"class_{c}")]
-        # Pick a search parameter the train is likely to actually have. If the
-        # customer cares about a specific class, use that; otherwise S_CHAIR
-        # is a safe default since almost every intercity train offers it.
-        seat_class_param = seat_classes[0] if seat_classes else "S_CHAIR"
-        token = secrets.token_urlsafe(24)
-        g.cur.execute(
-            """
-            INSERT INTO watches (
-                user_id, from_city, to_city, date_of_journey, train_model,
-                train_label, seat_classes, seat_class_param, tickets_needed,
-                action_token, status, is_paid
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending_payment', false)
-            RETURNING id
-            """,
-            (
-                user["id"],
-                request.form["from_city"].strip(),
-                request.form["to_city"].strip(),
-                request.form["date_of_journey"],
-                request.form["train_model"].strip(),
-                request.form["train_label"].strip(),
-                seat_classes,
-                seat_class_param,
-                request.form.get("tickets_needed", default=1, type=int),
-                token,
-            ),
+        from_city = request.form["from_city"].strip()
+        to_city = request.form["to_city"].strip()
+        date_of_journey = request.form["date_of_journey"]  # ISO, e.g. 2026-07-03
+
+        api_date = datetime.strptime(date_of_journey, "%Y-%m-%d").strftime("%d-%b-%Y")
+        try:
+            trains = railway_api.fetch_trains(from_city, to_city, api_date)
+        except railway_api.TokenExpired:
+            flash("Search is temporarily unavailable. Please try again shortly.")
+            return redirect(url_for("new_watch"))
+        except Exception:
+            flash("Couldn't reach the railway search right now. Please try again.")
+            return redirect(url_for("new_watch"))
+
+        return render_template(
+            "search_results.html",
+            trains=trains,
+            from_city=from_city,
+            to_city=to_city,
+            date_of_journey=date_of_journey,
+            display_date=date.fromisoformat(date_of_journey).strftime("%d %b %Y"),
         )
-        watch_id = g.cur.fetchone()["id"]
-        return redirect(url_for("payment_instructions", watch_id=watch_id))
+
     return render_template(
-        "new_watch.html", seat_classes=SEAT_CLASSES, today=date.today().isoformat()
+        "new_watch.html",
+        stations=STATIONS,
+        today=today.isoformat(),
+        max_date=max_date.isoformat(),
     )
+
+
+@app.route("/watches/create", methods=["POST"])
+@login_required
+def create_watch():
+    user = current_user()
+    available_classes = [c for c in request.form["available_classes"].split(",") if c]
+    seat_classes = [c for c in available_classes if request.form.get(f"class_{c}")]
+    # Pick a search parameter the train is confirmed to actually have (we
+    # just saw its real seat_types). If the customer didn't narrow it down,
+    # fall back to whichever class that train showed first.
+    seat_class_param = seat_classes[0] if seat_classes else (available_classes or ["S_CHAIR"])[0]
+    token = secrets.token_urlsafe(24)
+
+    g.cur.execute(
+        """
+        INSERT INTO watches (
+            user_id, from_city, to_city, date_of_journey, train_model,
+            train_label, seat_classes, seat_class_param, tickets_needed,
+            action_token, status, is_paid
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending_payment', false)
+        RETURNING id
+        """,
+        (
+            user["id"],
+            request.form["from_city"].strip(),
+            request.form["to_city"].strip(),
+            request.form["date_of_journey"],
+            request.form["train_model"].strip(),
+            request.form["train_label"].strip(),
+            seat_classes,
+            seat_class_param,
+            request.form.get("tickets_needed", default=1, type=int),
+            token,
+        ),
+    )
+    watch_id = g.cur.fetchone()["id"]
+    return redirect(url_for("payment_instructions", watch_id=watch_id))
 
 
 @app.route("/watches/<int:watch_id>/payment")
