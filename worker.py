@@ -12,11 +12,13 @@ operator's. Customers never provide their own Railway credentials; seat
 availability is the same regardless of whose token checks for it.
 """
 
+import html
 import os
 import smtplib
 import sys
 from collections import defaultdict
 from datetime import date
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 import psycopg2
@@ -42,8 +44,13 @@ OPERATOR_EMAIL = os.environ.get("OPERATOR_EMAIL", SMTP_USER)
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "https://your-app-domain.example")
 
 
-def send_email(to_addr, subject, body):
-    msg = MIMEText(body)
+def send_email(to_addr, subject, text_body, html_body=None):
+    if html_body:
+        msg = MIMEMultipart("alternative")
+        msg.attach(MIMEText(text_body, "plain"))
+        msg.attach(MIMEText(html_body, "html"))
+    else:
+        msg = MIMEText(text_body)
     msg["Subject"] = subject
     msg["From"] = SMTP_USER
     msg["To"] = to_addr
@@ -52,14 +59,79 @@ def send_email(to_addr, subject, body):
         server.sendmail(SMTP_USER, [to_addr], msg.as_string())
 
 
-def action_links(watch_id, token):
+def build_action_links(watch_id, token):
     base = f"{APP_BASE_URL}/watch/{watch_id}/action?token={token}"
+    return {
+        "done": f"{base}&action=done",
+        "bought_some": f"{APP_BASE_URL}/watch/{watch_id}/bought-some?token={token}",
+        "remind": f"{base}&action=remind",
+        "stop": f"{base}&action=stop",
+    }
+
+
+def build_email_text(watch, from_city, to_city, date_of_journey, matched):
+    links = build_action_links(watch["id"], watch["action_token"])
+    lines = [f"  {c}: {n} seat(s) online (fare {f})" for c, n, f in matched]
     return (
-        f"  Bought everything I needed:    {base}&action=done\n"
-        f"  Bought some, still need more:  {APP_BASE_URL}/watch/{watch_id}/bought-some?token={token}\n"
-        f"  Couldn't buy, keep reminding:  {base}&action=remind\n"
-        f"  Stop watching this train:      {base}&action=stop\n"
+        f"{watch['train_label']}, {from_city} to {to_city}, "
+        f"{date_of_journey.strftime('%d %b %Y')}\n\n"
+        + "\n".join(lines)
+        + "\n\nWhat would you like to do?\n\n"
+        f"  Bought everything I needed:    {links['done']}\n"
+        f"  Bought some, still need more:  {links['bought_some']}\n"
+        f"  Couldn't buy, keep reminding:  {links['remind']}\n"
+        f"  Stop watching this train:      {links['stop']}\n"
     )
+
+
+def build_email_html(watch, from_city, to_city, date_of_journey, matched):
+    links = build_action_links(watch["id"], watch["action_token"])
+    rows = "".join(
+        f"<tr><td>{html.escape(c)}</td><td>{n} online</td>"
+        f"<td>fare {html.escape(str(f))}</td></tr>"
+        for c, n, f in matched
+    )
+    return f"""\
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+          background:#f7f7f5; margin:0; padding:0; color:#1c1c1a; }}
+  .wrap {{ max-width: 480px; margin: 0 auto; padding: 24px 16px; }}
+  .card {{ background:#ffffff; border:1px solid #d8d6d0; border-radius:10px; padding:20px 20px 8px; }}
+  h1 {{ font-size:18px; margin:0 0 4px; }}
+  .route {{ color:#6b6b66; font-size:14px; margin:0 0 16px; }}
+  table.seats {{ width:100%; border-collapse:collapse; margin-bottom: 18px; }}
+  table.seats td {{ padding:6px 0; border-bottom:1px solid #ece9e3;
+                     font-family: "SFMono-Regular", Consolas, Menlo, monospace; font-size:13px; }}
+  a.btn {{ display:block; text-align:center; padding:11px 14px; margin-bottom:10px;
+           border-radius:7px; text-decoration:none; font-weight:600; font-size:14px; color:#ffffff !important; }}
+  a.btn-primary {{ background:#0f5c52; }}
+  a.btn-secondary {{ background:#3c7a70; }}
+  a.btn-danger {{ background:#8a3324; }}
+  .footer {{ color:#9a9a94; font-size:12px; text-align:center; margin-top: 8px; }}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>{html.escape(watch['train_label'])}</h1>
+    <p class="route">{html.escape(from_city)} to {html.escape(to_city)} &mdash; {date_of_journey.strftime('%d %b %Y')}</p>
+    <table class="seats">{rows}</table>
+    <div class="btn-row">
+      <a class="btn btn-primary" href="{links['done']}">Bought everything I needed</a>
+      <a class="btn btn-secondary" href="{links['bought_some']}">Bought some, still need more</a>
+      <a class="btn btn-secondary" href="{links['remind']}">Couldn't buy, keep reminding me</a>
+      <a class="btn btn-danger" href="{links['stop']}">Stop watching this train</a>
+    </div>
+  </div>
+  <p class="footer">railalert</p>
+</div>
+</body>
+</html>
+"""
 
 
 def main():
@@ -157,15 +229,9 @@ def main():
                 if not cur.fetchone()["due"]:
                     continue
 
-            lines = [f"  {c}: {n} seat(s) online (fare {f})" for c, n, f in matched]
-            body = (
-                f"{w['train_label']}, {from_city} to {to_city}, "
-                f"{date_of_journey.strftime('%d %b %Y')}\n\n"
-                + "\n".join(lines)
-                + "\n\nWhat would you like to do?\n\n"
-                + action_links(w["id"], w["action_token"])
-            )
-            send_email(w["email"], "Seat available on your watched train", body)
+            text_body = build_email_text(w, from_city, to_city, date_of_journey, matched)
+            html_body = build_email_html(w, from_city, to_city, date_of_journey, matched)
+            send_email(w["email"], "Seat available on your watched train", text_body, html_body)
 
             for cls, online, fare in matched:
                 cur.execute(
