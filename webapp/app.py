@@ -8,10 +8,13 @@ from flask import Flask, abort, flash, g, redirect, render_template, request, se
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import railway_api
+import cron_logic
 from db import get_conn, get_cursor
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ["SECRET_KEY"]
+
+CRON_SECRET = os.environ["CRON_SECRET"]
 
 BKASH_NUMBER = os.environ.get("BKASH_NUMBER", "01XXXXXXXXX")
 WATCH_FEE_BDT = os.environ.get("WATCH_FEE_BDT", "100")
@@ -26,6 +29,8 @@ with open(os.path.join(os.path.dirname(__file__), "stations.json")) as f:
 
 @app.before_request
 def open_db():
+    if request.endpoint == "internal_cron":
+        return  # this route manages its own connection; don't open one we won't use
     g.conn = get_conn()
     g.cur = get_cursor(g.conn)
 
@@ -295,6 +300,20 @@ def email_bought_some(watch_id):
         apply_action(watch_id, "bought_some", qty)
         return render_template("action_confirm.html", action="bought_some")
     return render_template("bought_some.html", watch=watch, token=token)
+
+
+# --- internal ops: hit by cron-job.org on a schedule, not by people ---
+
+
+@app.route("/internal/cron", methods=["GET", "POST"])
+def internal_cron():
+    if request.args.get("key") != CRON_SECRET:
+        abort(403)
+    # Deliberately does NOT use g.cur -- cron_logic.run_once() manages its
+    # own connection so it behaves identically whether called from here or
+    # from worker.py directly.
+    result = cron_logic.run_once()
+    return result, 200
 
 
 if __name__ == "__main__":

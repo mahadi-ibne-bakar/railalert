@@ -1,42 +1,56 @@
 # railalert web app
 
 Signup, login, a live train search (calls the real railway API the same way
-`worker.py` does), bKash payment instructions, dashboard with notification
+the cron job does), bKash payment instructions, dashboard with notification
 history, and the pages the worker's email action links point to. Talks to
-the same Postgres database as `worker.py`.
+the same Postgres database as the cron job.
 
-## What's new in this version
+## Step: moving off GitHub Actions for reliability
 
-The "track a new train" flow no longer makes customers type a train
-name/number by hand. They enter from/to/date, the app calls the real
-`search-trips-v2` endpoint live (same as the worker), and they pick a
-specific train and specific seat class(es) from real, current results.
+The actual seat-checking logic now lives in `cron_logic.py`, called from
+two places during this transition:
 
-This means **the web app now needs the operator's railway credentials too**
-(`RAIL_TOKEN`, `RAIL_DEVICE_ID`, `RAIL_DEVICE_KEY`) -- previously only
-`worker.py` used them. The header-building and request logic lives in
-`railway_api.py` in this folder, imported by both this app and (via a
-sys.path adjustment) `worker.py`, so there's one source of truth instead of
-two copies drifting apart.
+- `worker.py` (repo root) -- still run by GitHub Actions, unchanged behavior
+- `/internal/cron` (this app) -- the new path, meant to be driven by
+  cron-job.org instead
 
-**Operational consequence**: every ~12 hours when you refresh the railway
-token, it now needs to be updated in **two** places, not one -- the GitHub
-Secret (for the worker) and the Render environment variable (for this app).
-Forgetting the second one doesn't crash anything; live search just shows a
-"temporarily unavailable" message until it's updated.
+Both are safe to run at once: a Postgres advisory lock means if one is
+already mid-run, the other just skips rather than double-processing and
+sending duplicate emails. Once the new path has run reliably for a while,
+`worker.py` and the GitHub Actions workflow get deleted and this becomes the
+only path -- not yet, deliberately, so there's no gap in coverage while this
+is being proven out.
 
-`stations.json` is a seed list of station names (in the railway API's own
-spelling, e.g. `Biman_Bandar` with an underscore) used to power autocomplete
-suggestions on the from/to fields. It's a starting point, not guaranteed
-complete or permanently accurate -- worth periodically cross-checking
-against the live API (e.g. via `/v1.0/web/train-routes` per train) rather
-than treated as a fixed source of truth.
+### One-time setup for this step
+
+1. **Run the migration.** Supabase -> SQL Editor -> paste the contents of
+   `migrations/001_cron_health.sql` -> Run. (Purely additive -- adds columns,
+   doesn't touch existing data or behavior.)
+2. **Generate a cron secret** and add it as a new Render environment
+   variable, `CRON_SECRET`:
+   ```bash
+   python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+   ```
+3. **Redeploy** so Render picks up the new env var and code.
+4. **Test it by hand first.** Visit
+   `https://your-app.onrender.com/internal/cron?key=YOUR_CRON_SECRET`
+   directly in a browser. You should get back a short status line like
+   `ok: 1 unique search(es), 2 watch(es), 0 alert(s) sent`. Then check
+   Supabase's `worker_state` table -- `last_run_at` should be the current
+   time, `last_run_ok` should be `true`.
+5. **Set up cron-job.org**: create a free account, create a new cron job
+   pointed at that same URL, interval every 5 minutes. Leave it running
+   alongside GitHub Actions for now.
+6. **Watch it for a while** (a day or so is plenty) before we retire the
+   GitHub Actions workflow in a later step -- want to see it actually hit
+   that 5-minute cadence reliably first.
 
 ## Environment variables
 
 - `DATABASE_URL` -- same Supabase connection string the worker uses
 - `RAIL_TOKEN`, `RAIL_DEVICE_ID`, `RAIL_DEVICE_KEY` -- same values as the
-  worker's GitHub Secrets (see the note above about updating both places)
+  worker's GitHub Secrets (update both places when you refresh the token)
+- `CRON_SECRET` -- random string gating the `/internal/cron` route (new, see above)
 - `SECRET_KEY` -- random string used to sign session cookies. Generate one with:
   `python3 -c "import secrets; print(secrets.token_hex(32))"`
 - `BKASH_NUMBER` -- the number customers send payment to (default is a placeholder)

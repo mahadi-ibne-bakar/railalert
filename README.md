@@ -1,5 +1,12 @@
 # railalert
 
+> **Note:** this file describes the original Postgres migration step. The
+> project has grown a lot since -- a full web app now exists in `webapp/`,
+> and `worker.py` is now a thin wrapper around `webapp/cron_logic.py` (see
+> that folder's README for the current setup, including the move to
+> cron-job.org for reliable scheduling). Kept here as a record of the
+> original setup steps below.
+
 Multi-tenant version: customers will eventually sign up through a web app
 (not built yet), pick trains to watch, and pay a flat fee per watch. This
 step replaces the single JSON-file state from the personal-use version with
